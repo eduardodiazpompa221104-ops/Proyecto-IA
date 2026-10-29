@@ -11,12 +11,12 @@ ARCHIVO_MODELO = os.path.join(RUTA_DATOS, "modelo_lsm.joblib")
 ARCHIVO_ENCODER = os.path.join(RUTA_DATOS, "encoder.joblib")
 
 if not (os.path.exists(ARCHIVO_MODELO) and os.path.exists(ARCHIVO_ENCODER)):
-    raise FileNotFoundError("Faltan modelo_lsm.joblib o encoder.joblib. Entrena primero.")
+    raise FileNotFoundError("Faltan modelo_lsm.joblib o encoder.joblib. Entrena primero con entrenar_modelo.py.")
 
 modelo = joblib.load(ARCHIVO_MODELO)
 encoder = joblib.load(ARCHIVO_ENCODER)
 
-#  MediaPipe 
+# MediaPipe 
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 
@@ -27,10 +27,10 @@ hands = mp_hands.Hands(
     min_tracking_confidence=0.6,
 )
 
-#  Configuración de estabilidad 
-BUFFER_SIZE = 12            # Frames suavizados
-UMBRAL_CONFIRMACION = 18    # Frames seguidos con misma letra para agregar
-FRAMES_SIN_MANO_RESET = 30  # Si no hay mano, reiniciar contador
+# Configuración de estabilidad 
+BUFFER_SIZE = 12 
+UMBRAL_CONFIRMACION = 18 
+FRAMES_SIN_MANO_RESET = 30 
 
 historial = deque(maxlen=BUFFER_SIZE)
 letra_actual = None
@@ -43,7 +43,15 @@ cap = cv2.VideoCapture(0)
 if not cap.isOpened():
     raise RuntimeError("No se pudo abrir la camara.")
 
-print("Presiona 'q' = salir | 'espacio' = espacio | 'b' = borrar letra | 'c' = limpiar frase")
+# Configurar resolución amplia a HD (1280x720)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+NOMBRE_VENTANA = "Traductor de Lengua de Senas Mexicana"
+cv2.namedWindow(NOMBRE_VENTANA, cv2.WINDOW_NORMAL)
+cv2.resizeWindow(NOMBRE_VENTANA, 1280, 720)
+
+print("Presiona '1' = salir | 'espacio' = espacio | '2' = borrar letra | 'c' = limpiar frase")
 
 while cap.isOpened():
     ok, frame = cap.read()
@@ -51,6 +59,7 @@ while cap.isOpened():
         break
 
     frame = cv2.flip(frame, 1)
+    h, w, _ = frame.shape
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     rgb.flags.writeable = False
     results = hands.process(rgb)
@@ -63,8 +72,8 @@ while cap.isOpened():
         for hand_landmarks in results.multi_hand_landmarks:
             mp_drawing.draw_landmarks(
                 frame, hand_landmarks, mp_hands.HAND_CONNECTIONS,
-                mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=3),
-                mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2),
+                mp_drawing.DrawingSpec(color=(0, 255, 128), thickness=2, circle_radius=4),
+                mp_drawing.DrawingSpec(color=(255, 100, 0), thickness=2),
             )
             landmarks = []
             for lm in hand_landmarks.landmark:
@@ -76,12 +85,8 @@ while cap.isOpened():
 
         historial.append(prediccion_frame)
 
-        # Voto mayoritario del buffer
         if historial:
             letra_actual = Counter(historial).most_common(1)[0][0]
-
-        cv2.putText(frame, f"Sena: {letra_actual}", (10, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 255, 0), 3)
     else:
         frames_sin_mano += 1
         if frames_sin_mano >= FRAMES_SIN_MANO_RESET:
@@ -89,10 +94,8 @@ while cap.isOpened():
             letra_actual = None
             frames_confirmados = 0
             ultima_agregada = None
-        cv2.putText(frame, "Sin mano", (10, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
 
-    # Confirmación para agregar letra 
+    # Confirmación para agregar letra a la frase
     if letra_actual is not None:
         if letra_actual == ultima_agregada:
             frames_confirmados += 1
@@ -105,20 +108,40 @@ while cap.isOpened():
             print(f"+ '{letra_actual}' | Frase: {frase}")
             frames_confirmados = 0
 
-    # Overlay 
-    cv2.rectangle(frame, (0, frame.shape[0] - 60), (frame.shape[1], frame.shape[0]),
-                  (0, 0, 0), -1)
-    cv2.putText(frame, f"Frase: {frase}", (10, frame.shape[0] - 20),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+    # PANEL SUPERIOR E INFERIOR ESTILIZADO CON OPACIDAD
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (0, 0), (w, 70), (20, 20, 20), -1)           # Panel superior
+    cv2.rectangle(overlay, (0, h - 80), (w, h), (15, 15, 15), -1)        # Panel inferior
+    cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
 
-    cv2.imshow("Reconocimiento LSM (Py 3.13)", frame)
+    # Texto en el panel superior (Detección en vivo)
+    if letra_actual is not None:
+        # Barra de progreso visual para confirmar la letra
+        progreso = min(frames_confirmados / UMBRAL_CONFIRMACION, 1.0)
+        cv2.rectangle(frame, (20, 52), (20 + int(progreso * 200), 58), (0, 255, 0), -1)
+        
+        cv2.putText(frame, f"Sena detectada: {letra_actual}", (20, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 128), 2)
+    else:
+        cv2.putText(frame, "Esperando mano...", (20, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (100, 100, 255), 2)
+
+    # Texto en el panel inferior (Frase construida)
+    cv2.putText(frame, f"Frase: {frase}", (20, h - 35),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+
+    # Guía de atajos
+    cv2.putText(frame, "[1] Salir  |  [2] Borrar letra  |  [Espacio] Espacio  |  [C] Limpiar",
+                (w - 550, h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)
+
+    cv2.imshow(NOMBRE_VENTANA, frame)
 
     key = cv2.waitKey(1) & 0xFF
-    if key == ord('q'):
+    if key == ord('1'):
         break
     elif key == ord(' '):
         frase += " "
-    elif key == ord('b'):
+    elif key == ord('2'):
         frase = frase[:-1]
     elif key == ord('c'):
         frase = ""

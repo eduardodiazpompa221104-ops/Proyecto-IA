@@ -8,7 +8,7 @@ RUTA_DATOS = "datos_senas"
 ARCHIVO_DATASET = os.path.join(RUTA_DATOS, "dataset.npz")
 os.makedirs(RUTA_DATOS, exist_ok=True)
 
-#  MediaPipe 
+# MediaPipe 
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 
@@ -22,22 +22,28 @@ hands = mp_hands.Hands(
 # Mapeo teclas -> letras LSM 
 MAPEO_TECLAS = {ord(c): c.upper() for c in "abcdefghijklmnopqrstuvwxyz"}
 
-# Cargar datos previos si existen 
+# Cargar datos previos de forma segura liberando el archivo
+X, y = [], []
 if os.path.exists(ARCHIVO_DATASET):
-    data = np.load(ARCHIVO_DATASET, allow_pickle=False)
-    X = list(data["X"])
-    y = list(data["y"].astype(str))
+    with np.load(ARCHIVO_DATASET, allow_pickle=False) as data:
+        X = list(data["X"])
+        y = list(data["y"].astype(str))
     print(f"Dataset previo cargado: {len(X)} muestras.")
-else:
-    X, y = [], []
 
 cap = cv2.VideoCapture(0)
 if not cap.isOpened():
     raise RuntimeError("No se pudo abrir la camara. Revisa permisos o conexion.")
 
+# Configurar resolución de captura
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+NOMBRE_VENTANA = "Captura de Datos - LSM"
+cv2.namedWindow(NOMBRE_VENTANA, cv2.WINDOW_NORMAL)
+cv2.resizeWindow(NOMBRE_VENTANA, 1280, 720)
+
 print("Presiona la tecla de la letra que haras con la mano.")
-print("'q' = salir y guardar | 'u' = deshacer ultima muestra")
-print("Recomendado: ~40 muestras por letra en distintas posiciones e iluminacion.\n")
+print("'1' = salir y guardar | '2' = deshacer muestra | '3' = BORRAR TODO EL DATASET\n")
 
 while cap.isOpened():
     ok, frame = cap.read()
@@ -45,6 +51,7 @@ while cap.isOpened():
         break
 
     frame = cv2.flip(frame, 1)
+    h, w, _ = frame.shape
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     rgb.flags.writeable = False
     results = hands.process(rgb)
@@ -64,28 +71,64 @@ while cap.isOpened():
                 landmarks_actuales.extend([lm.x, lm.y, lm.z])
             landmarks_actuales = np.asarray(landmarks_actuales, dtype=np.float32)
 
-        cv2.putText(frame, "Mano detectada", (10, 30),
+    # Panel superior
+    overlay = frame.copy()
+    panel_alto = 130
+    cv2.rectangle(overlay, (0, 0), (w, panel_alto), (20, 20, 20), -1)
+    cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+
+    # Estado de la mano
+    if landmarks_actuales is not None:
+        cv2.putText(frame, "Mano detectada", (20, 35),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
     else:
-        cv2.putText(frame, "Sin mano", (10, 30),
+        cv2.putText(frame, "Sin mano", (20, 35),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
-    # Contador por clase
+    # Total de muestras capturadas
+    cv2.putText(frame, f"Total muestras: {len(X)}", (300, 35),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
+    # Conteo por clase
     conteo = {}
     for etiqueta in y:
         conteo[etiqueta] = conteo.get(etiqueta, 0) + 1
-    texto_conteo = " ".join(f"{k}:{v}" for k, v in sorted(conteo.items()))
-    cv2.putText(frame, f"Total: {len(X)} | {texto_conteo}", (10, 60),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+    
+    items = [f"{k}:{v}" for k, v in sorted(conteo.items())]
+    
+    max_items_por_fila = 13
+    y_offset = 70
+    for i in range(0, len(items), max_items_por_fila):
+        linea_texto = "  ".join(items[i:i + max_items_por_fila])
+        cv2.putText(frame, linea_texto, (20, y_offset),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
+        y_offset += 25
 
-    cv2.imshow("Captura de Datos - LSM (Py 3.13)", frame)
+    # Barra inferior con las instrucciones
+    cv2.rectangle(frame, (0, h - 35), (w, h), (0, 0, 0), -1)
+    cv2.putText(frame, " [1] Guardar y Salir  |  [2] Deshacer ultima  |  [3] BORRAR TODO  |  A-Z para capturar ",
+                (20, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
+
+    cv2.imshow(NOMBRE_VENTANA, frame)
     key = cv2.waitKey(1) & 0xFF
 
-    if key == ord('q'):
+    if key == ord('1'):
         break
-    elif key == ord('u') and X:
-        X.pop(); y.pop()
-        print(f"Deshecho. Total: {len(X)}")
+    elif key == ord('2') and X:
+        X.pop()
+        y.pop()
+        print(f"Última muestra eliminada. Total: {len(X)}")
+    elif key == ord('3'):
+        X.clear()
+        y.clear()
+        if os.path.exists(ARCHIVO_DATASET):
+            try:
+                os.remove(ARCHIVO_DATASET)
+                print("¡TODO EL DATASET HA SIDO BORRADO DEL DISCO Y MEMORIA!")
+            except PermissionError:
+                print("Memoria limpiada. El archivo del disco se sobrescribirá al salir.")
+        else:
+            print("Memoria limpiada.")
     elif key in MAPEO_TECLAS and landmarks_actuales is not None:
         etiqueta = MAPEO_TECLAS[key]
         X.append(landmarks_actuales)
@@ -95,7 +138,7 @@ while cap.isOpened():
 cap.release()
 cv2.destroyAllWindows()
 
-# Guardar en formato seguro .npz 
+# Guardar dataset si hay muestras
 if X:
     X_arr = np.stack(X).astype(np.float32)
     y_arr = np.asarray(y, dtype="U1")
