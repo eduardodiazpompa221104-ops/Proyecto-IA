@@ -1,12 +1,13 @@
 import numpy as np
 import os
+from pathlib import Path
 import joblib
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score, classification_report
 
-RUTA_DATOS = "datos_senas"
+RUTA_DATOS = Path(__file__).resolve().parent.parent / "datos_senas"
 ARCHIVO_DATASET = os.path.join(RUTA_DATOS, "dataset.npz")
 ARCHIVO_MODELO = os.path.join(RUTA_DATOS, "modelo_lsm.joblib")
 ARCHIVO_ENCODER = os.path.join(RUTA_DATOS, "encoder.joblib")
