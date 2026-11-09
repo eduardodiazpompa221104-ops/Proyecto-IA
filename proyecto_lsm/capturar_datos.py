@@ -2,13 +2,14 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import os
+from pathlib import Path
 
-# Configuración 
-RUTA_DATOS = "datos_senas"
+# Configuración
+RUTA_DATOS = Path(__file__).resolve().parent.parent / "datos_senas"
 ARCHIVO_DATASET = os.path.join(RUTA_DATOS, "dataset.npz")
 os.makedirs(RUTA_DATOS, exist_ok=True)
 
-# MediaPipe 
+# MediaPipe
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 
@@ -19,7 +20,7 @@ hands = mp_hands.Hands(
     min_tracking_confidence=0.6,
 )
 
-# Mapeo teclas -> letras LSM 
+# Mapeo teclas -> letras LSM
 MAPEO_TECLAS = {ord(c): c.upper() for c in "abcdefghijklmnopqrstuvwxyz"}
 
 # Cargar datos previos de forma segura liberando el archivo
@@ -93,9 +94,9 @@ while cap.isOpened():
     conteo = {}
     for etiqueta in y:
         conteo[etiqueta] = conteo.get(etiqueta, 0) + 1
-    
+
     items = [f"{k}:{v}" for k, v in sorted(conteo.items())]
-    
+
     max_items_por_fila = 13
     y_offset = 70
     for i in range(0, len(items), max_items_por_fila):

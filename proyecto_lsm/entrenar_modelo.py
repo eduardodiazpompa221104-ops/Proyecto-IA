@@ -1,60 +1,44 @@
 import numpy as np
 import os
 import joblib
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, cross_val_score
+from pathlib import Path
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import accuracy_score, classification_report
+from tensorflow import keras
+from tensorflow.keras import layers
 
-RUTA_DATOS = "datos_senas"
-ARCHIVO_DATASET = os.path.join(RUTA_DATOS, "dataset.npz")
-ARCHIVO_MODELO = os.path.join(RUTA_DATOS, "modelo_lsm.joblib")
-ARCHIVO_ENCODER = os.path.join(RUTA_DATOS, "encoder.joblib")
+RUTA_DATOS = Path(__file__).resolve().parent.parent / "datos_senas"
+ARCHIVO = os.path.join(RUTA_DATOS, "dataset_din.npz")
 
-#  Cargar datos 
-if not os.path.exists(ARCHIVO_DATASET):
-    raise FileNotFoundError("No existe dataset.npz. Ejecuta primero capturar_datos.py")
-
-data = np.load(ARCHIVO_DATASET, allow_pickle=False)
-X = data["X"].astype(np.float32)
+data = np.load(ARCHIVO, allow_pickle=False)
+X = data["X"].astype(np.float32)          # (N, 30, 63)
 y = data["y"].astype(str)
 
-print(f"Muestras: {len(X)} | Clases: {len(set(y))}")
-
-#  Codificar etiquetas 
 encoder = LabelEncoder()
 y_enc = encoder.fit_transform(y)
-print(f"Clases: {list(encoder.classes_)}")
+print(f"Secuencias: {len(X)} | Clases: {list(encoder.classes_)}")
 
-# Split 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y_enc, test_size=0.2, random_state=42, stratify=y_enc
-)
+X_tr, X_te, y_tr, y_te = train_test_split(
+    X, y_enc, test_size=0.2, random_state=42, stratify=y_enc)
 
-# Modelo 
-modelo = RandomForestClassifier(
-    n_estimators=200,
-    max_depth=None,
-    min_samples_leaf=2,
-    n_jobs=-1,
-    random_state=42,
-)
+modelo = keras.Sequential([
+    layers.Input(shape=(30, 63)),
+    layers.LSTM(64, return_sequences=True),
+    layers.LSTM(32),
+    layers.Dense(32, activation="relu"),
+    layers.Dropout(0.3),
+    layers.Dense(len(encoder.classes_), activation="softmax"),
+])
+modelo.compile(optimizer="adam", loss="sparse_categorical_crossentropy",
+               metrics=["accuracy"])
 
-# Validación cruzada 
-scores = cross_val_score(modelo, X_train, y_train, cv=5, n_jobs=-1)
-print(f"CV (5-fold): {scores.mean():.2%} +/- {scores.std():.2%}")
+modelo.fit(X_tr, y_tr, validation_data=(X_te, y_te), epochs=60, batch_size=16,
+           callbacks=[keras.callbacks.EarlyStopping(patience=10,
+                                                    restore_best_weights=True)])
 
-# Entrenamiento final 
-modelo.fit(X_train, y_train)
+loss, acc = modelo.evaluate(X_te, y_te, verbose=0)
+print(f"\nPrecision en test: {acc:.2%}")
 
-# Evaluaciónm 
-y_pred = modelo.predict(X_test)
-acc = accuracy_score(y_test, y_pred)
-print(f"\nPrecision en test: {acc:.2%}\n")
-print(classification_report(y_test, y_pred, target_names=encoder.classes_, zero_division=0))
-
-# Guardar con joblib 
-joblib.dump(modelo, ARCHIVO_MODELO, compress=3)
-joblib.dump(encoder, ARCHIVO_ENCODER, compress=3)
-print(f"Modelo guardado en: {ARCHIVO_MODELO}")
-print(f"Encoder guardado en: {ARCHIVO_ENCODER}")
+modelo.save(os.path.join(RUTA_DATOS, "modelo_din.keras"))
+joblib.dump(encoder, os.path.join(RUTA_DATOS, "encoder_din.joblib"), compress=3)
+print("Modelo dinámico guardado.")
