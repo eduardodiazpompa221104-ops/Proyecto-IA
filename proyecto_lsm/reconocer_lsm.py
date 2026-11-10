@@ -1,5 +1,7 @@
 import os
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # menos ruido de TensorFlow
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")  # solo CPU
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 
 import cv2
 import mediapipe as mp
@@ -14,7 +16,9 @@ from tensorflow import keras
 from estabilidad import ConfirmadorLetra
 from voz import ReproductorVoz
 
+# ----------------------------------------------------------------------------
 # Rutas
+# ----------------------------------------------------------------------------
 RUTA_DATOS = Path(__file__).resolve().parent.parent / "datos_senas"
 ARCHIVO_MODELO = os.path.join(RUTA_DATOS, "modelo_lsm.joblib")
 ARCHIVO_ENCODER = os.path.join(RUTA_DATOS, "encoder.joblib")
@@ -40,7 +44,9 @@ else:
     print("Aviso: no hay modelo dinamico (modelo_din.keras). "
           "Solo se reconocen senas estaticas.")
 
+# ----------------------------------------------------------------------------
 # MediaPipe
+# ----------------------------------------------------------------------------
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 
@@ -51,7 +57,9 @@ hands = mp_hands.Hands(
     min_tracking_confidence=0.6,
 )
 
+# ----------------------------------------------------------------------------
 # Parámetros
+# ----------------------------------------------------------------------------
 # Umbrales iniciales; ajustar con pruebas de la cámara y el modelo.
 # La mejor letra debe alcanzar 55 % y superar a la segunda por 8 puntos porcentuales.
 CONFIANZA_MINIMA = 0.55
@@ -63,7 +71,7 @@ confirmador = ConfirmadorLetra(segundos_estables=0.6, segundos_sin_mano=0.4)
 T = 30                       # frames por secuencia (igual que en el entrenamiento)
 UMBRAL_MOVIMIENTO = 0.02     # variación de x,y en la ventana; ajustar con pruebas
 CONFIANZA_DINAMICA = 0.75    # confianza mínima del LSTM
-PREDECIR_CADA = 3            # corre el LSTM cada N frames para no bajar los FPS
+PREDECIR_CADA = 6            # corre el LSTM cada N frames para no bajar los FPS
 CLASE_NADA = "_"             # clase "movimiento sin seña"
 SEGUNDOS_AVISO_DIN = 1.5     # tiempo que se muestra la última letra dinámica
 
@@ -76,8 +84,9 @@ frase = ""
 # Este objeto lee una copia de la frase sin detener la captura de video.
 reproductor = ReproductorVoz()
 
+# ----------------------------------------------------------------------------
 # Cámara
-
+# ----------------------------------------------------------------------------
 cap = cv2.VideoCapture(0)
 if not cap.isOpened():
     raise RuntimeError("No se pudo abrir la camara.")
@@ -119,8 +128,9 @@ while cap.isOpened():
     letra_dinamica = None
     mano_presente = bool(results.multi_hand_landmarks)
 
-
+    # ------------------------------------------------------------------
     # 1) Landmarks + predicción estática (Random Forest)
+    # ------------------------------------------------------------------
     if results.multi_hand_landmarks:
         for hand_landmarks in results.multi_hand_landmarks:
             mp_drawing.draw_landmarks(
@@ -153,8 +163,9 @@ while cap.isOpened():
         # Sin mano no hay secuencia válida.
         buffer.clear()
 
-
+    # ------------------------------------------------------------------
     # 2) Detector de movimiento + predicción dinámica (LSTM)
+    # ------------------------------------------------------------------
     en_movimiento = False
     if mano_presente and len(buffer) == T:
         secuencia = np.stack(buffer).reshape(T, 21, 3)
@@ -169,12 +180,15 @@ while cap.isOpened():
 
             if (modelo_din is not None and not confirmador.esperando_retiro
                     and contador_frames % PREDECIR_CADA == 0):
-                p = modelo_din.predict(secuencia[np.newaxis], verbose=0)[0]
-                k = int(np.argmax(p))
-                letra_din = str(encoder_din.inverse_transform([k])[0])
-                if p[k] >= CONFIANZA_DINAMICA and letra_din != CLASE_NADA:
-                    letra_dinamica = letra_din
-                    confianza = float(p[k])
+                try:
+                    p = modelo_din(secuencia[np.newaxis], training=False).numpy()[0]
+                    k = int(np.argmax(p))
+                    letra_din = str(encoder_din.inverse_transform([k])[0])
+                    if p[k] >= CONFIANZA_DINAMICA and letra_din != CLASE_NADA:
+                        letra_dinamica = letra_din
+                        confianza = float(p[k])
+                except Exception as error:
+                    print(f"Error en el modelo dinamico: {error}")
 
     if letra_dinamica is not None:
         frase += letra_dinamica
@@ -184,8 +198,9 @@ while cap.isOpened():
         confirmador.esperando_retiro = True
         buffer.clear()
 
-
+    # ------------------------------------------------------------------
     # 3) Confirmación temporal de letras estáticas
+    # ------------------------------------------------------------------
     letra_actual = prediccion_frame
     # Solo devuelve una letra cuando lleva suficiente tiempo siendo aceptada.
     # Devuelve None si hay incertidumbre, falta la mano o falta retirarla.
@@ -194,8 +209,10 @@ while cap.isOpened():
         frase += nueva_letra
         buffer.clear()
         print(f"+ '{nueva_letra}' | Frase: {frase}")
-        
+
+    # ------------------------------------------------------------------
     # 4) Interfaz
+    # ------------------------------------------------------------------
     overlay = frame.copy()
     cv2.rectangle(overlay, (0, 0), (w, 70), (20, 20, 20), -1)           # Panel superior
     cv2.rectangle(overlay, (0, h - 80), (w, h), (15, 15, 15), -1)        # Panel inferior
@@ -244,7 +261,9 @@ while cap.isOpened():
 
     cv2.imshow(NOMBRE_VENTANA, frame)
 
+    # ------------------------------------------------------------------
     # 5) Teclado
+    # ------------------------------------------------------------------
     key = cv2.waitKey(1) & 0xFF
     if key == ord('1'):
         break
