@@ -44,7 +44,10 @@ cv2.namedWindow(NOMBRE_VENTANA, cv2.WINDOW_NORMAL)
 cv2.resizeWindow(NOMBRE_VENTANA, 1280, 720)
 
 print("Presiona la tecla de la letra que haras con la mano.")
-print("'1' = salir y guardar | '2' = deshacer muestra | '3' = BORRAR TODO EL DATASET\n")
+print("'1' = salir y guardar | '2' = deshacer muestra | '3' = BORRAR TODO")
+print("'4' = borrar todos los registros de una letra | 'Esc' = cancelar borrado\n")
+
+modo_borrado = False
 
 while cap.isOpened():
     ok, frame = cap.read()
@@ -86,6 +89,10 @@ while cap.isOpened():
         cv2.putText(frame, "Sin mano", (20, 35),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
+    if modo_borrado:
+        cv2.putText(frame, "MODO BORRADO: Presiona A-Z para elegir | ESC para cancelar",
+                    (20, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
+
     # Total de muestras capturadas
     cv2.putText(frame, f"Total muestras: {len(X)}", (300, 35),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
@@ -107,11 +114,25 @@ while cap.isOpened():
 
     # Barra inferior con las instrucciones
     cv2.rectangle(frame, (0, h - 35), (w, h), (0, 0, 0), -1)
-    cv2.putText(frame, " [1] Guardar y Salir  |  [2] Deshacer ultima  |  [3] BORRAR TODO  |  A-Z para capturar ",
+    cv2.putText(frame, " [1] Guardar y salir | [2] Deshacer | [3] Borrar todo | [4] Borrar letra | A-Z capturar ",
                 (20, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
 
     cv2.imshow(NOMBRE_VENTANA, frame)
     key = cv2.waitKey(1) & 0xFF
+
+    if modo_borrado:
+        if key == 27:
+            modo_borrado = False
+            print("Borrado por letra cancelado.")
+        elif key in MAPEO_TECLAS:
+            etiqueta = MAPEO_TECLAS[key]
+            indices_conservar = [i for i, actual in enumerate(y) if actual != etiqueta]
+            eliminadas = len(y) - len(indices_conservar)
+            X = [X[i] for i in indices_conservar]
+            y = [y[i] for i in indices_conservar]
+            modo_borrado = False
+            print(f"Registros de '{etiqueta}' eliminados: {eliminadas} | Total: {len(X)}")
+        continue
 
     if key == ord('1'):
         break
@@ -130,6 +151,9 @@ while cap.isOpened():
                 print("Memoria limpiada. El archivo del disco se sobrescribirá al salir.")
         else:
             print("Memoria limpiada.")
+    elif key == ord('4'):
+        modo_borrado = True
+        print("Modo borrado: presiona A-Z para eliminar sus registros o Esc para cancelar.")
     elif key in MAPEO_TECLAS and landmarks_actuales is not None:
         etiqueta = MAPEO_TECLAS[key]
         X.append(landmarks_actuales)
@@ -146,4 +170,7 @@ if X:
     np.savez_compressed(ARCHIVO_DATASET, X=X_arr, y=y_arr)
     print(f"\nDataset guardado: {ARCHIVO_DATASET} ({len(X)} muestras)")
 else:
+    if os.path.exists(ARCHIVO_DATASET):
+        os.remove(ARCHIVO_DATASET)
+        print("\nDataset sin muestras; archivo anterior eliminado.")
     print("\nNo hay datos para guardar.")

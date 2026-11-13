@@ -37,9 +37,11 @@ cv2.resizeWindow(NOMBRE_VENTANA, 1280, 720)
 
 grabando = None   # etiqueta que se está grabando
 buffer = []
+modo_borrado = False
 
 print("J / Z / N(=Ñ) / Q = grabar 30 frames | 0 = movimiento sin seña")
 print("'1' = guardar y salir | '2' = deshacer última | '3' = borrar todo")
+print("'4' = borrar todos los registros de una etiqueta | 'Esc' = cancelar borrado")
 
 while cap.isOpened():
     ok, frame = cap.read()
@@ -79,12 +81,30 @@ while cap.isOpened():
         cv2.putText(frame, f"Mano: {'SI' if vec is not None else 'NO'} | Secuencias: {texto}",
                     (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
 
+    if modo_borrado:
+        cv2.putText(frame, "MODO BORRADO: J/Z/N/Q/K/X/0 | ESC para cancelar",
+                    (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
+
     cv2.rectangle(frame, (0, h - 35), (w, h), (0, 0, 0), -1)
-    cv2.putText(frame, " [J][Z][N=Ñ][Q] grabar | [0] sin sena | [1] Guardar y salir | [2] Deshacer | [3] Borrar todo",
+    cv2.putText(frame, " [J][Z][N=Ñ][Q] grabar | [0] sin sena | [1] Guardar | [2] Deshacer | [3] Todo | [4] Etiqueta",
                 (20, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
 
     cv2.imshow(NOMBRE_VENTANA, frame)
     key = cv2.waitKey(1) & 0xFF
+
+    if modo_borrado:
+        if key == 27:
+            modo_borrado = False
+            print("Borrado por etiqueta cancelado.")
+        elif key in MAPEO:
+            etiqueta = MAPEO[key]
+            indices_conservar = [i for i, actual in enumerate(y) if actual != etiqueta]
+            eliminadas = len(y) - len(indices_conservar)
+            X = [X[i] for i in indices_conservar]
+            y = [y[i] for i in indices_conservar]
+            modo_borrado = False
+            print(f"Registros de '{etiqueta}' eliminados: {eliminadas} | Total: {len(X)}")
+        continue
 
     if key == ord('1'):
         break
@@ -101,6 +121,9 @@ while cap.isOpened():
             except PermissionError:
                 pass
         print("Dataset dinámico borrado.")
+    elif key == ord('4') and grabando is None:
+        modo_borrado = True
+        print("Modo borrado: presiona J/Z/N/Q/K/X/0 para eliminar la etiqueta o Esc para cancelar.")
     elif key in MAPEO and grabando is None and vec is not None:
         grabando = MAPEO[key]
         buffer = []
@@ -113,4 +136,7 @@ if X:
                         y=np.asarray(y, dtype="U1"))
     print(f"Guardado: {ARCHIVO} ({len(X)} secuencias)")
 else:
+    if os.path.exists(ARCHIVO):
+        os.remove(ARCHIVO)
+        print("Dataset sin secuencias; archivo anterior eliminado.")
     print("No hay datos para guardar.")
